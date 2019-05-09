@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import re  # regular expressions
 from functools import partial
+from collections import Counter
 from nltk import word_tokenize, sent_tokenize, bigrams
 # import tika
 # from tika import parser
@@ -28,7 +29,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 DIRECTORY = '/Users/willskywalker/Documents/Workplace/HUDOCcrawler/'
 
 
-def make_eng_txt(article, doctype, docname):
+def make_eng_txt(article, doctype, docname, raw_text=False):
     filename = os.path.join(DIRECTORY, 'docs/', doctype, str(article)+'/', docname.replace('/', '_'))
     print(filename)
     # print(type(filename))
@@ -43,8 +44,12 @@ def make_eng_txt(article, doctype, docname):
                 with open(filename[:-4]+'.txt', 'w') as g:
                     g.write(text)
             except pdftotext.Error:
-                return []
+                return '' if raw_text else []
     # text = data['content']
+    if raw_text:
+        if type(text) != str:
+            return ''
+        return text
 
     text = text.split('\n')
     lines = []
@@ -125,17 +130,18 @@ def update_database(dbname, article=6, lang='ENG'):
 
     def get_text(doctype):
         def func(docname):
-            return make_eng_txt(article, doctype, docname)
+            return make_eng_txt(article, doctype, docname, raw_text=True)
         return func
 
     collections['text'] = list(map(get_text('COMMUNICATEDCASES'), collections['docname'].tolist()))
-    decisions['text'] = list(map(get_text('DECISIONS'), decisions['docname'].tolist()))
-    judgements['text'] = list(map(get_text('JUDGMENTS'), judgements['docname'].tolist()))
+    collections.to_sql('CommunicatedCases', engine, if_exists='replace')
 
+    decisions['text'] = list(map(get_text('DECISIONS'), decisions['docname'].tolist()))
+    decisions.to_sql('Decisions', engine, if_exists='replace')
+
+    judgements['text'] = list(map(get_text('JUDGMENTS'), judgements['docname'].tolist()))
     print(len(judgements['text']))
-    collections.to_sql('CommunicatedCases', engine)
-    decisions.to_sql('Decisions', engine)
-    judgements.to_sql('Judgments', engine)
+    judgements.to_sql('Judgments', engine, if_exists='replace')
 
 #0 - no violation
 #1 - violation
@@ -152,7 +158,15 @@ def decision_anal(desc):
     else:
         return 2
 
-def train_model(article=6, lang='ENG'):
+def decision_anal_simple(desc):
+    if 'Violation of Article 3' in desc:
+        return 1
+    elif 'No violation of Article 6' in desc:
+        return 0
+    else:
+        return 0
+
+def all_dataset(article=6, lang='ENG', test_size=0.2):
     collections = pd.read_csv(os.path.join(DIRECTORY, 'Article%d_%s_%s.csv' % (article, 'COMMUNICATEDCASES', lang)))
     decisions = pd.read_csv(os.path.join(DIRECTORY, 'Article%d_%s_%s.csv' % (article, 'DECISIONS', lang)))
     judgements = pd.read_csv(os.path.join(DIRECTORY, 'Article%d_%s_%s.csv' % (article, 'JUDGMENTS', lang)))
@@ -166,13 +180,60 @@ def train_model(article=6, lang='ENG'):
         docname = collections[collections['appno'] == appno]['docname'].iloc[0]
         print(docname)
         X.append(make_eng_txt(article, 'COMMUNICATEDCASES', docname))
-        Y.append(decision_anal(judgements[judgements['appno'] == appno].iloc[0]['conclusion']))
+        # Y.append(decision_anal(judgements[judgements['appno'] == appno].iloc[0]['conclusion']))
+        Y.append(decision_anal_simple(judgements[judgements['appno'] == appno].iloc[0]['conclusion']))
 
     # print(len(X))
     # print(Y)
     # print(len(set(Y)))
     # print(set(Y))
     Xtrain, Xtest, Ytrain, Ytest = train_test_split(X, Y, test_size=0.2)
+    return X, Y, Xtrain, Xtest, Ytrain, Ytest
+
+
+def balance_dataset(article=6, lang='ENG', test_size=0.2):
+    collections = pd.read_csv(os.path.join(DIRECTORY, 'Article%d_%s_%s.csv' % (article, 'COMMUNICATEDCASES', lang)))
+    decisions = pd.read_csv(os.path.join(DIRECTORY, 'Article%d_%s_%s.csv' % (article, 'DECISIONS', lang)))
+    judgements = pd.read_csv(os.path.join(DIRECTORY, 'Article%d_%s_%s.csv' % (article, 'JUDGMENTS', lang)))
+    j_c = set(collections['appno']) & set(judgements['appno'])
+    # print(j_c)
+    # print(len(j_c))
+    # X_filelist = collections[collections['appno'].isin(j_c)]['docname']
+
+    X = []
+    Y = []
+    ytemp = []
+    for appno in j_c:
+        docname = collections[collections['appno'] == appno]['docname'].iloc[0]
+        ytemp.append(decision_anal_simple(judgements[judgements['appno'] == appno].iloc[0]['conclusion']))
+
+    limit = Counter(ytemp).most_common()[-1][1]
+    counts = {}
+    for appno in j_c:
+        docname = collections[collections['appno'] == appno]['docname'].iloc[0]
+        print(docname)
+        x = make_eng_txt(article, 'COMMUNICATEDCASES', docname)
+        y = decision_anal_simple(judgements[judgements['appno'] == appno].iloc[0]['conclusion'])
+        # Y.append(decision_anal(judgements[judgements['appno'] == appno].iloc[0]['conclusion']))
+        if counts.setdefault(y, 0) <= limit:
+            X.append(x)
+            Y.append(y)
+        counts[y] += 1
+
+    # print(len(X))
+    # print(Y)
+    # print(len(set(Y)))
+    # print(set(Y))
+    Xtrain, Xtest, Ytrain, Ytest = train_test_split(X, Y, test_size=0.2)
+    return X, Y, Xtrain, Xtest, Ytrain, Ytest
+
+
+def train_model(article=6, lang='ENG'):
+
+    # X, Y, Xtrain, Xtest, Ytrain, Ytest = all_dataset(test_size=0.2)
+    X, Y, Xtrain, Xtest, Ytrain, Ytest = balance_dataset(test_size=0.2)
+
+    print(len(Xtrain), len(Ytrain), len(Xtest), len(Ytest))
 
     m_sg = Word2Vec.load('model_sg')
     w2v_sg = dict(zip(m_sg.wv.index2word, m_sg.wv.vectors))
@@ -195,7 +256,16 @@ def train_model(article=6, lang='ENG'):
         ("word2vec vectorizer", TfidfEmbeddingVectorizer(w2v_sg)),
         ("extra trees", LinearSVC())])
 
-    print(len(Xtrain), len(Ytrain), len(Xtest), len(Ytest))
+    etree_count.fit(Xtrain, Ytrain)
+    Ypredict = etree_count.predict(Xtest)
+    print(confusion_matrix(Ytest, Ypredict))
+    print(classification_report(Ytest, Ypredict))
+
+    etree_w2v.fit(Xtrain, Ytrain)
+    Ypredict = etree_w2v.predict(Xtest)
+    print(confusion_matrix(Ytest, Ypredict))
+    print(classification_report(Ytest, Ypredict))
+
     etree_w2v_tfidf.fit(Xtrain, Ytrain)
     Ypredict = etree_w2v_tfidf.predict(Xtest)
     print(confusion_matrix(Ytest, Ypredict))
@@ -306,9 +376,9 @@ def main():
     w2v_cbow = dict(zip(m_cbow.wv.index2word, m_cbow.wv.vectors))
 
     # display_closestwords_tsnescatterplot(m_sg, 'Russia')
-    # update_database('echr_art6.sqlite')
+    update_database('echr_art6.sqlite')
 
-    train_model()
+    # train_model()
 
 
 
