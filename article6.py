@@ -29,6 +29,11 @@ from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 DIRECTORY = '/Users/willskywalker/Documents/Workplace/HUDOCcrawler/'
 
 
+def process_pdf(fhand, raw_text=False):
+    docname = fhand.name[:-4]
+    pages = 
+
+
 def make_eng_txt(article, doctype, docname, raw_text=False):
     filename = os.path.join(DIRECTORY, 'docs/', doctype, str(article)+'/', docname.replace('/', '_'))
     print(filename)
@@ -376,9 +381,9 @@ def main():
     w2v_cbow = dict(zip(m_cbow.wv.index2word, m_cbow.wv.vectors))
 
     # display_closestwords_tsnescatterplot(m_sg, 'Russia')
-    update_database('echr_art6.sqlite')
+    # update_database('echr_art6.sqlite')
 
-    # train_model()
+    train_model()
 
 
 
