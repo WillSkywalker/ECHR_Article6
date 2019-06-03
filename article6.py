@@ -31,7 +31,9 @@ DIRECTORY = '/Users/willskywalker/Documents/Workplace/HUDOCcrawler/'
 
 def process_pdf(fhand, raw_text=False):
     docname = fhand.name[:-4]
-    pages = 
+    pages = pdftotext.PDF(fhand)
+    processed = [' '.join(page.split('\n')[1:]) for page in pages]
+
 
 
 def make_eng_txt(article, doctype, docname, raw_text=False):
@@ -44,8 +46,15 @@ def make_eng_txt(article, doctype, docname, raw_text=False):
     else:
         with open(filename+'.pdf', "rb") as f:
             try:
-                pdf = pdftotext.PDF(f)
-                text = "\n\n".join(pdf)
+                pdf = []
+                for idx, page in enumerate(pdftotext.PDF(f)):
+                    lines = page.split('\n')
+                    if lines[0].strip()[:2].strip() == str(idx+1) or lines[0].strip()[-2:].strip() == str(idx+1):
+                        pdf.append(' '.join(lines[1:]))
+                    else:
+                        pdf.append(' '.join(lines))
+                # pdf = (' '.join(page.split('\n')[1:]) for page in pdftotext.PDF(f))
+                text = "\n".join(pdf)
                 with open(filename[:-4]+'.txt', 'w') as g:
                     g.write(text)
             except pdftotext.Error:
@@ -364,23 +373,39 @@ def evaluate(Ytest, Ypredict): #evaluate the model (accuracy, precision, recall,
     print('F1-score (weighted):', f1_score(Ytest, Ypredict, average='weighted'))
     print('F1-score (macro):', f1_score(Ytest, Ypredict, average='macro'))
 
+
+def load_from_sql(dbname='echr_art6.sqlite'):
+    engine = create_engine('sqlite:///'+dbname, echo=True)
+    collections = pd.read_sql('CommunicatedCases', engine)
+    decisions = pd.read_sql('Decisions', engine)
+    judgments = pd.read_sql('Judgments', engine)
+
+    return collections['text'].tolist() + decisions['text'].tolist() + judgments['text'].tolist()
+
+
 def main():
-    # print(make_eng_txt('/Users/willskywalker/Documents/Workplace/HUDOCcrawler/docs/DECISIONS/6/A v. NORWAY.pdf'))
+    print(make_eng_txt(6, 'DECISIONS', 'A v. NORWAY', raw_text=True))
+    w2vset = load_from_sql()
     # w2vset = load_documents_w2v(6)
+    print('Loading complete.')
     # model_sg = Word2Vec(w2vset, size=200, workers=14, sg=1, window=5)
     # model_sg.save('./model_sg')
     # model_cbow = Word2Vec(w2vset, size=200, workers=14, sg=0, window=10)
     # model_cbow.save('./model_cbow')
+    model_sg = Word2Vec(w2vset, size=200, workers=14, sg=1, window=10)
+    model_sg.save('./model_sg_10')
+    model_cbow = Word2Vec(w2vset, size=200, workers=14, sg=0, window=5)
+    model_cbow.save('./model_cbow_5')
     # w2v_sg = dict(zip(model_sg.wv.index2word, model_sg.wv.vectors))
     # print(model_sg.similar_by_word('judge'))
 
 
-    m_sg = Word2Vec.load('model_sg')
-    w2v_sg = dict(zip(m_sg.wv.index2word, m_sg.wv.vectors))
-    m_cbow = Word2Vec.load('model_cbow')
-    w2v_cbow = dict(zip(m_cbow.wv.index2word, m_cbow.wv.vectors))
+    # m_sg = Word2Vec.load('model_sg')
+    # w2v_sg = dict(zip(m_sg.wv.index2word, m_sg.wv.vectors))
+    # m_cbow = Word2Vec.load('model_cbow')
+    # w2v_cbow = dict(zip(m_cbow.wv.index2word, m_cbow.wv.vectors))
 
-    # display_closestwords_tsnescatterplot(m_sg, 'Russia')
+    # # display_closestwords_tsnescatterplot(m_sg, 'Russia')
     # update_database('echr_art6.sqlite')
 
     train_model()
