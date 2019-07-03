@@ -7,7 +7,7 @@ import pandas as pd
 from sqlalchemy import create_engine
 from collections import Counter
 
-from gensim.models import Word2Vec
+from gensim.models import Word2Vec, KeyedVectors
 from sklearn.manifold import TSNE
 
 from sklearn.pipeline import Pipeline
@@ -21,6 +21,10 @@ from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 
 
 class NoFactSectionError(Exception):
+    pass
+
+
+class NoComplainSectionError(Exception):
     pass
 
 
@@ -58,7 +62,7 @@ def admissibility_anal_simple(desc):
 
 def extract_decision(text, simple=True):
     try:
-        for pattern in ('the Court unanimously', 'the Commission', 'the Court by a majority'):
+        for pattern in ('the Court unanimously', 'the Commission', 'the Court by a majority', 'Now, therefore, the Commission'):
             if pattern in text:
                 desc = text.split(pattern)
                 break
@@ -71,10 +75,10 @@ def extract_decision(text, simple=True):
         return None
 
 
-
+factre = re.compile(r'(PROCEDURE|FACTS|Summary of the facts|Summary of the relevant facts)(.*?)?(COMPLAINT|THE LAW|FINDING|PROCEEDINGS)', re.DOTALL)
 def extract_fact(text):
     try:
-        return text.split('FACTS')[1].split('COMPLAINTS')[0]
+        return factre.search(text)[2]
     except:
         raise NoFactSectionError
 
@@ -90,36 +94,51 @@ def extract_fact(text):
 #8 – Free assistance of an interpreter – Article 6(3)(e)
 def clustering(text):
     try:
-        complaints = text.split('COMPLAINTS')[1]
+        complaints = re.findall(r'(?:COMPLAINT|THE LAW)(.*)', text, re.DOTALL)[0]
+        # complaints = text.split('COMPLAINT')[1]
     except:
-        raise NoFactSectionError
+        # raise NoComplainSectionError
+        return -2
     if 'Article 6 § 1' in complaints:
         if 'right of access to court' in complaints:
             return 0
         elif 'independent and impartial tribunal' in complaints:
             return 1
+        elif 'fairness of proceedings'in complaints:
+            return 2
         elif 'unreasonable length of the proceedings' in complaints:
             return 3
-
+        else:
+            return -1
+    elif 'Article 6 § 2' in complaints:
+        return 4
+    # else:
+        # print(text)
 
 def load_data(dbname='echr_art6.sqlite'):
     engine = create_engine('sqlite:///'+dbname, echo=True)
     data = pd.read_sql('Decisions', engine)
-    # print(data)
-    # a = data.iloc[2]
-    # print(data.iloc[2])
+
     X = []
     Y = []
     types = []
     unused = []
+
+    nocomplain = []
     for idx, case in data.iterrows():
         # print(case)
         try:
             if case['text']:
                 fact = extract_fact(case['text'])
-                decision = admissibility_anal(case['conclusion'])
+                # decision = admissibility_anal(case['conclusion'])
+                decision = admissibility_anal_simple(case['conclusion'])
                 X.append(fact)
                 Y.append(decision)
+                types.append(clustering(case['text']))
+
+                if clustering(case['text']) == -2:
+                    nocomplain.append((case['appno'], case['docname']))
+
         except NoFactSectionError:
             unused.append((case['appno'], case['docname']))
         except NoDecisionError:
@@ -127,11 +146,17 @@ def load_data(dbname='echr_art6.sqlite'):
             if decision:
                 X.append(fact)
                 Y.append(decision)
+                types.append(clustering(case['text']))
             else:
                 print(case['appno'], case['docname'])
-    # print(unused)
+
+    print('Total: ', len(X))
     print('Unused: ', len(unused))
     print(unused[:20])
+
+    print(nocomplain[:20])
+    print(Counter(types).most_common())
+
     return X, Y
 
 
@@ -177,6 +202,7 @@ def load_balanced_data(dbname='echr_art6.sqlite'):
                 if counts.setdefault(decision, 0) <= limit:
                     X.append(fact)
                     Y.append(decision)
+                    types.append(clustering(case['text']))
                     counts[decision] += 1
         except NoFactSectionError:
             unused.append((case['appno'], case['docname']))
@@ -186,12 +212,14 @@ def load_balanced_data(dbname='echr_art6.sqlite'):
                 if counts.setdefault(decision, 0) <= limit:
                     X.append(fact)
                     Y.append(decision)
+                    types.append(clustering(case['text']))
                     counts[decision] += 1
             else:
                 print(case['appno'], case['docname'])
 
     print('Unused: ', len(unused))
     print(unused[:20])
+    print(Counter(types).most_common())
     return X, Y
 
 
@@ -204,7 +232,9 @@ def predict(X, Y):
 
     print(len(Xtrain), len(Ytrain), len(Xtest), len(Ytest))
 
-    m_sg = Word2Vec.load('model_sg_10')
+    m_ga = KeyedVectors.load_word2vec_format('/Users/willskywalker/Documents/Workplace/GoogleNews-vectors-negative300.bin.gz', binary=True)
+    m_g = dict(zip(m_ga.wv.index2word, m_ga.wv.vectors))
+    m_sg = KeyedVectors.load_word2vec_format('masha_model_cbow_w2v')
     # m_sg = Word2Vec.load('admissibility_model_sg')
     w2v_sg = dict(zip(m_sg.wv.index2word, m_sg.wv.vectors))
     m_cbow = Word2Vec.load('model_cbow_5')
@@ -222,11 +252,13 @@ def predict(X, Y):
         ("extra trees", LinearSVC())])
     etree_w2v = Pipeline([
         # ("word2vec vectorizer", article6.MeanEmbeddingVectorizer(w2v_sg)),
-        ("word2vec vectorizer", article6.MeanEmbeddingVectorizer(w2v_cbow)),
+        ("word2vec vectorizer", article6.MeanEmbeddingVectorizer(m_g)),
+        # ("word2vec vectorizer", article6.MeanEmbeddingVectorizer(w2v_cbow)),
         ("extra trees", LinearSVC())])
     etree_w2v_tfidf = Pipeline([
         # ("word2vec vectorizer", article6.TfidfEmbeddingVectorizer(w2v_sg)),
-        ("word2vec vectorizer", article6.TfidfEmbeddingVectorizer(w2v_cbow)),
+        ("word2vec vectorizer", article6.TfidfEmbeddingVectorizer(m_g)),
+        # ("word2vec vectorizer", article6.TfidfEmbeddingVectorizer(w2v_cbow)),
         ("extra trees", LinearSVC())])
 
     etree_count.fit(Xtrain, Ytrain)
@@ -244,9 +276,9 @@ def predict(X, Y):
     print(confusion_matrix(Ytest, Ypredict))
     print(classification_report(Ytest, Ypredict))
 
-    print(cross_validate(etree_count, X, Y, scoring=['precision_micro', 'recall_micro', 'f1_micro']))
-    print(cross_validate(etree_w2v, X, Y, scoring=['precision_micro', 'recall_micro', 'f1_micro']))
-    print(cross_validate(etree_w2v_tfidf, X, Y, scoring=['precision_micro', 'recall_micro', 'f1_micro']))
+    # print(cross_validate(etree_count, X, Y, scoring=['precision_micro', 'recall_micro', 'f1_micro']))
+    # print(cross_validate(etree_w2v, X, Y, scoring=['precision_micro', 'recall_micro', 'f1_micro']))
+    # print(cross_validate(etree_w2v_tfidf, X, Y, scoring=['precision_micro', 'recall_micro', 'f1_micro']))
 
     return X, Y, Xtrain, Xtest, Ytrain, Ytest, Ypredict
 

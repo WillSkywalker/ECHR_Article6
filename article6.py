@@ -136,8 +136,14 @@ def display_closestwords_tsnescatterplot(model, word):
     plt.show()
 
 
-def update_database(dbname, article=6, lang='ENG'):
-    engine = create_engine('sqlite:///'+dbname, echo=True)
+def update_database(article=6, lang='ENG'):
+    '''
+    TODO: Migrate the entire thing to SQLAlchemy
+    '''
+    from webapi.config import Config
+    from sqlalchemy.dialects import mysql
+
+    engine = create_engine(Config.SQLALCHEMY_DATABASE_URI, echo=True)
     collections = pd.read_csv(os.path.join(DIRECTORY, 'Article%d_%s_%s.csv' % (article, 'COMMUNICATEDCASES', lang)))
     decisions = pd.read_csv(os.path.join(DIRECTORY, 'Article%d_%s_%s.csv' % (article, 'DECISIONS', lang)))
     judgements = pd.read_csv(os.path.join(DIRECTORY, 'Article%d_%s_%s.csv' % (article, 'JUDGMENTS', lang)))
@@ -147,15 +153,17 @@ def update_database(dbname, article=6, lang='ENG'):
             return make_eng_txt(article, doctype, docname, raw_text=True)
         return func
 
+    dtype_dict = {'text': mysql.LONGTEXT, 'extractedappno': mysql.LONGTEXT}
+
     collections['text'] = list(map(get_text('COMMUNICATEDCASES'), collections['docname'].tolist()))
-    collections.to_sql('CommunicatedCases', engine, if_exists='replace')
+    collections.to_sql('CommunicatedCases', engine, if_exists='replace', dtype=dtype_dict)
 
     decisions['text'] = list(map(get_text('DECISIONS'), decisions['docname'].tolist()))
-    decisions.to_sql('Decisions', engine, if_exists='replace')
+    decisions.to_sql('Decisions', engine, if_exists='replace', dtype=dtype_dict)
 
     judgements['text'] = list(map(get_text('JUDGMENTS'), judgements['docname'].tolist()))
     print(len(judgements['text']))
-    judgements.to_sql('Judgments', engine, if_exists='replace')
+    judgements.to_sql('Judgments', engine, if_exists='replace', dtype=dtype_dict)
 
 #0 - no violation
 #1 - violation
@@ -384,18 +392,18 @@ def load_from_sql(dbname='echr_art6.sqlite'):
 
 
 def main():
-    print(make_eng_txt(6, 'DECISIONS', 'A v. NORWAY', raw_text=True))
-    w2vset = load_from_sql()
+    # print(make_eng_txt(6, 'DECISIONS', 'A v. NORWAY', raw_text=True))
+    # w2vset = load_from_sql()
     # w2vset = load_documents_w2v(6)
-    print('Loading complete.')
+    # print('Loading complete.')
     # model_sg = Word2Vec(w2vset, size=200, workers=14, sg=1, window=5)
     # model_sg.save('./model_sg')
     # model_cbow = Word2Vec(w2vset, size=200, workers=14, sg=0, window=10)
     # model_cbow.save('./model_cbow')
-    model_sg = Word2Vec(w2vset, size=200, workers=14, sg=1, window=10)
-    model_sg.save('./model_sg_10')
-    model_cbow = Word2Vec(w2vset, size=200, workers=14, sg=0, window=5)
-    model_cbow.save('./model_cbow_5')
+    # model_sg = Word2Vec(w2vset, size=200, workers=14, sg=1, window=10)
+    # model_sg.save('./model_sg_10')
+    # model_cbow = Word2Vec(w2vset, size=200, workers=14, sg=0, window=5)
+    # model_cbow.save('./model_cbow_5')
     # w2v_sg = dict(zip(model_sg.wv.index2word, model_sg.wv.vectors))
     # print(model_sg.similar_by_word('judge'))
 
@@ -406,9 +414,9 @@ def main():
     # w2v_cbow = dict(zip(m_cbow.wv.index2word, m_cbow.wv.vectors))
 
     # # display_closestwords_tsnescatterplot(m_sg, 'Russia')
-    # update_database('echr_art6.sqlite')
+    update_database()
 
-    train_model()
+    # train_model()
 
 
 
