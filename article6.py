@@ -9,6 +9,8 @@ import re  # regular expressions
 from functools import partial
 from collections import Counter
 from nltk import word_tokenize, sent_tokenize, bigrams
+
+from webapi.config import Config
 # import tika
 # from tika import parser
 import pdftotext
@@ -382,24 +384,24 @@ def evaluate(Ytest, Ypredict): #evaluate the model (accuracy, precision, recall,
     print('F1-score (macro):', f1_score(Ytest, Ypredict, average='macro'))
 
 
-def load_from_sql(dbname='echr_art6.sqlite'):
-    engine = create_engine('sqlite:///'+dbname, echo=True)
-    collections = pd.read_sql('CommunicatedCases', engine)
-    decisions = pd.read_sql('Decisions', engine)
-    judgments = pd.read_sql('Judgments', engine)
+def load_from_sql():
+    engine = create_engine(Config.SQLALCHEMY_DATABASE_URI, echo=True)
+    collections = pd.read_sql('0_CommunicatedCases', engine)
+    decisions = pd.read_sql('0_Decisions', engine)
+    judgments = pd.read_sql('0_Judgments', engine)
 
     return collections['text'].tolist() + decisions['text'].tolist() + judgments['text'].tolist()
 
 
 def main():
     # print(make_eng_txt(6, 'DECISIONS', 'A v. NORWAY', raw_text=True))
-    # w2vset = load_from_sql()
+    w2vset = load_from_sql()
     # w2vset = load_documents_w2v(6)
     # print('Loading complete.')
-    # model_sg = Word2Vec(w2vset, size=200, workers=14, sg=1, window=5)
-    # model_sg.save('./model_sg')
-    # model_cbow = Word2Vec(w2vset, size=200, workers=14, sg=0, window=10)
-    # model_cbow.save('./model_cbow')
+    model_sg = Word2Vec(w2vset, size=200, workers=14, sg=1, window=5)
+    model_sg.save('./alldoc_model_sg')
+    model_cbow = Word2Vec(w2vset, size=200, workers=14, sg=0, window=5)
+    model_cbow.save('./alldoc_model_cbow')
     # model_sg = Word2Vec(w2vset, size=200, workers=14, sg=1, window=10)
     # model_sg.save('./model_sg_10')
     # model_cbow = Word2Vec(w2vset, size=200, workers=14, sg=0, window=5)
@@ -414,7 +416,7 @@ def main():
     # w2v_cbow = dict(zip(m_cbow.wv.index2word, m_cbow.wv.vectors))
 
     # # display_closestwords_tsnescatterplot(m_sg, 'Russia')
-    update_database()
+    # update_database()
 
     # train_model()
 
